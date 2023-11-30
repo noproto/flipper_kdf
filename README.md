@@ -11,7 +11,7 @@ This repository tracks all available KDF plugins for the Flipper Zero
 1. Install official firmware version 0.94.0 or up
 2. Download a release build containing a ZIP of all of the Flipper plugins (fal)
 3. Use qFlipper to extract the plugins to /ext/apps_data/nfc/plugins/
-4. Scan your card normally using the NFC app (NFC -> Read)
+4. Scan your card as you normally would using the NFC app (NFC -> Read)
 
 Tracking official KDF plugin support: https://github.com/flipperdevices/flipperzero-firmware/issues/3197
 
