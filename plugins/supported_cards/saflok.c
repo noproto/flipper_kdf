@@ -1,4 +1,6 @@
 // From: https://gitee.com/jadenwu/Saflok_KDF/blob/master/saflok.c
+// KDF published and reverse engineered by Jaden Wu
+// FZ plugin by @noproto
 
 #include "nfc_supported_card_plugin.h"
 #include <flipper_application/flipper_application.h>
@@ -11,18 +13,33 @@
 #define MAGIC_TABLE_SIZE 192
 #define KEY_LENGTH 6
 #define UID_LENGTH 4
+#define CHECK_SECTOR 1
 
 typedef struct {
     uint64_t a;
     uint64_t b;
 } MfClassicKeyPair;
 
-typedef struct {
-    const MfClassicKeyPair* keys;
-    uint32_t data_sector;
-} SaflokCardConfig;
+static MfClassicKeyPair saflok_1k_keys[] = {
+    {.a = 0x000000000000, .b = 0xffffffffffff}, // 000
+    {.a = 0x2a2c13cc242a, .b = 0xffffffffffff}, // 001
+    {.a = 0xffffffffffff, .b = 0xffffffffffff}, // 002
+    {.a = 0xffffffffffff, .b = 0xffffffffffff}, // 003
+    {.a = 0x000000000000, .b = 0xffffffffffff}, // 004
+    {.a = 0x000000000000, .b = 0xffffffffffff}, // 005
+    {.a = 0x000000000000, .b = 0xffffffffffff}, // 006
+    {.a = 0x000000000000, .b = 0xffffffffffff}, // 007
+    {.a = 0x000000000000, .b = 0xffffffffffff}, // 008
+    {.a = 0x000000000000, .b = 0xffffffffffff}, // 009
+    {.a = 0x000000000000, .b = 0xffffffffffff}, // 010
+    {.a = 0x000000000000, .b = 0xffffffffffff}, // 011
+    {.a = 0x000000000000, .b = 0xffffffffffff}, // 012
+    {.a = 0x000000000000, .b = 0xffffffffffff}, // 013
+    {.a = 0x000000000000, .b = 0xffffffffffff}, // 014
+    {.a = 0x000000000000, .b = 0xffffffffffff}, // 015
+};
 
-void generate_saflok_key(uint8_t *uid, uint8_t *key) {
+void generate_saflok_key(const uint8_t *uid, uint8_t *key) {
     static const uint8_t magic_table[MAGIC_TABLE_SIZE] = {
                     0x00, 0x00, 0xAA, 0x00, 0x00, 0x00, 0xF0, 0x57, 0xB3, 0x9E, 0xE3, 0xD8,
                     0x00, 0x00, 0xAA, 0x00, 0x00, 0x00, 0x96, 0x9D, 0x95, 0x4A, 0xC1, 0x57,
@@ -48,7 +65,7 @@ void generate_saflok_key(uint8_t *uid, uint8_t *key) {
     uint8_t temp_key[KEY_LENGTH] = {magic_byte, uid[0], uid[1], uid[2], uid[3], magic_byte};
     uint8_t carry_sum = 0;
 
-    for (int i = KEY_LENGTH - 1; i >= 0 && magickal_index >= 0; i--, magickal_index--) {
+    for (int i = KEY_LENGTH - 1; i >= 0; i--, magickal_index--) {
         uint16_t keysum = temp_key[i] + magic_table[magickal_index];
         temp_key[i] = (keysum & 0xFF) + carry_sum;
         carry_sum = keysum >> 8;
@@ -57,60 +74,93 @@ void generate_saflok_key(uint8_t *uid, uint8_t *key) {
     memcpy(key, temp_key, KEY_LENGTH);
 }
 
-static bool saflok_verify(Nfc* nfc, NfcDevice* device) {
+static bool saflok_verify(Nfc* nfc) {
+    bool verified = false;
+
+    do {
+        const uint8_t block_num = mf_classic_get_first_block_num_of_sector(CHECK_SECTOR);
+        FURI_LOG_D(TAG, "Saflok: Verifying sector %i", CHECK_SECTOR);
+
+        MfClassicKey key = {0};
+        nfc_util_num2bytes(saflok_1k_keys[CHECK_SECTOR].a, COUNT_OF(key.data), key.data);
+
+        MfClassicAuthContext auth_context;
+        MfClassicError error =
+            mf_classic_poller_sync_auth(nfc, block_num, &key, MfClassicKeyTypeA, &auth_context);
+        if(error != MfClassicErrorNone) {
+            FURI_LOG_D(TAG, "Saflok: Failed to read block %u: %d", block_num, error);
+            break;
+        }
+
+        verified = true;
+    } while(false);
+
+    return verified;
+}
+
+static bool saflok_read(Nfc* nfc, NfcDevice* device) {
+    FURI_LOG_D(TAG, "Entering Saflok KDF");
+
     furi_assert(nfc);
     furi_assert(device);
 
-    bool verified = false; // I think we keep this set to false, so it doesn't attempt to read/parse the card
-                           // All we need the plugin to do is to store the key if it is verified
+    bool is_read = false;
 
     MfClassicData* data = mf_classic_alloc();
     nfc_device_copy_data(device, NfcProtocolMfClassic, data);
 
     do {
-        MfClassicType type = MfClassicTypeMini;
+        MfClassicType type = MfClassicType1k;
         MfClassicError error = mf_classic_poller_sync_detect_type(nfc, &type);
-        if (error != MfClassicErrorNone) break;
-
+        if(error != MfClassicErrorNone) break;
         data->type = type;
-        uint8_t uid[UID_LENGTH];
-        memcpy(uid, data->uid.data, UID_LENGTH);
+
+        size_t uid_len;
+        const uint8_t* uid = mf_classic_get_uid(data, &uid_len);
+        FURI_LOG_D(TAG, "Saflok: UID identified: %02X%02X%02X%02X", uid[0], uid[1], uid[2], uid[3]);
+        if(uid_len != UID_LENGTH) break;
 
         uint8_t key[KEY_LENGTH];
         generate_saflok_key(uid, key);
+        uint64_t num_key = nfc_util_bytes2num(key, KEY_LENGTH);
+        FURI_LOG_D(TAG, "Saflok: Key generated for UID: %012llX", num_key);
 
-        for (size_t i = 0; i < mf_classic_get_total_sectors_num(data->type); i++) {
-            const uint8_t block_num = mf_classic_get_first_block_num_of_sector(i);
-            MfClassicKey mf_key = {0};
-            memcpy(mf_key.data, key, KEY_LENGTH);
-
-            MfClassicAuthContext auth_context;
-            error = mf_classic_poller_sync_auth(nfc, block_num, &mf_key, MfClassicKeyTypeA, &auth_context);
-            if (error == MfClassicErrorNone) {
-                verified = false;
-                break;
-            }
-
-            error = mf_classic_poller_sync_auth(nfc, block_num, &mf_key, MfClassicKeyTypeB, &auth_context);
-            if (error == MfClassicErrorNone) {
-                verified = false;
-                break;
+        for(size_t i = 0; i < mf_classic_get_total_sectors_num(data->type); i++) {
+            if(saflok_1k_keys[i].a == 0x000000000000) {
+                saflok_1k_keys[i].a = num_key;
             }
         }
-    } while (false);
+
+        MfClassicDeviceKeys keys = {};
+        for(size_t i = 0; i < mf_classic_get_total_sectors_num(data->type); i++) {
+            nfc_util_num2bytes(saflok_1k_keys[i].a, sizeof(MfClassicKey), keys.key_a[i].data);
+            FURI_BIT_SET(keys.key_a_mask, i);
+            nfc_util_num2bytes(saflok_1k_keys[i].b, sizeof(MfClassicKey), keys.key_b[i].data);
+            FURI_BIT_SET(keys.key_b_mask, i);
+        }
+
+        error = mf_classic_poller_sync_read(nfc, &keys, data);
+        if(error != MfClassicErrorNone) {
+            FURI_LOG_W(TAG, "Failed to read data");
+            break;
+        }
+
+        nfc_device_set_data(device, NfcProtocolMfClassic, data);
+
+        is_read = true;
+    } while(false);
 
     mf_classic_free(data);
 
-    return verified;
+    return is_read;
 }
 
 /* Actual implementation of app<>plugin interface */
 static const NfcSupportedCardsPlugin saflok_plugin = {
     .protocol = NfcProtocolMfClassic,
     .verify = saflok_verify,
+    .read = saflok_read,
     // KDF mode
-    // If this ends up crashing we'll use empty functions (no official KDF interface yet)
-    .read = NULL,
     .parse = NULL,
 };
 
