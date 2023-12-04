@@ -1,0 +1,46 @@
+name: Build and Release on Tag
+
+on:
+  push:
+    tags:
+      - '*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v2
+
+    - name: Clone Flipperzero Firmware Repository
+      run: |
+        git clone https://github.com/flipperdevices/flipperzero-firmware.git
+        cd flipperzero-firmware
+        git checkout $(git ls-remote --tags --sort=committerdate 2>/dev/null | grep -o 'tags/.*' | grep -v rc | tail -n1)
+
+    - name: Append File to Flipperzero Firmware
+      run: |
+        cat ${GITHUB_WORKSPACE}/application.fam >> ${GITHUB_WORKSPACE}/flipperzero-firmware/applications/main/nfc/application.fam
+
+    - name: Copy Supported Cards Plugins
+      run: |
+        cp -r ${GITHUB_WORKSPACE}/plugins/supported_cards/. ${GITHUB_WORKSPACE}/flipperzero-firmware/applications/main/nfc/plugins/supported_cards/
+
+    - name: Build Firmware
+      run: |
+        cd ${GITHUB_WORKSPACE}/flipperzero-firmware
+        ./fbt fap_dist
+
+    - name: Create Zip File
+      run: |
+        cd ${GITHUB_WORKSPACE}/flipperzero-firmware/dist/f7-D/apps_data/nfc/plugins
+        zip -r plugins.zip . -x all_in_one_parser.fal opal_parser.fal myki_parser.fal troika_parser.fal two_cities_parser.fal plantain_parser.fal
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          ${GITHUB_WORKSPACE}/flipperzero-firmware/dist/f7-D/apps_data/nfc/plugins/plugins.zip
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
