@@ -8,15 +8,7 @@
 
 This repository tracks all available community KDF (key derivation function) plugins for the Flipper Zero.
 
-### KDF plugins
-
-**ST25TB**
-* MyKey (*since v1.0.0*)
-
-**MIFARE Classic**
-* Saflok (*since v1.0.0*)
-
-Have you identified a KDF that is not listed here? PR's to this repository are welcome.
+Plugin list: https://github.com/noproto/flipper_kdf/wiki/List
 
 ## How
 
