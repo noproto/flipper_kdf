@@ -8,7 +8,7 @@
 
 This repository tracks all available community KDF (key derivation function) plugins for the Flipper Zero.
 
-KDF plugins:
+### KDF plugins
 
 **ST25TB**
 * MyKey (*since v1.0.0*)
