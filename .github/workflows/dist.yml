@@ -35,7 +35,7 @@ jobs:
     - name: Create Zip File
       run: |
         cd ${GITHUB_WORKSPACE}/flipperzero-firmware/dist/f7-D/apps_data/nfc/plugins
-        zip -r plugins.zip . -x all_in_one_parser.fal opal_parser.fal myki_parser.fal troika_parser.fal two_cities_parser.fal plantain_parser.fal
+        zip -r plugins.zip . -x all_in_one_parser.fal opal_parser.fal myki_parser.fal troika_parser.fal two_cities_parser.fal plantain_parser.fal aime_parser.fal
 
     - name: Create Release
       uses: softprops/action-gh-release@v1
